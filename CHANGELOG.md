@@ -20,17 +20,23 @@ the notes of the version's GitHub Release.
   is fitted.
 - Open and Close buttons, never a switch. The relay is a toggle, so every
   pulse is decided on the door read just now: "Open" only to a closed door,
-  "Close" only to an open one; moving, stopped or unknown is refused.
-  Opening is off by default; closing is always allowed, never queued, one try
-  during a pause, and cancels a pending opening. After a pulse, another one
-  waits until the door is read where it was sent (45 s at most, kept across a
-  restart).
+  "Close" only to an open one; moving, stopped or unknown is refused. Closing
+  is the same pulse as opening, so both are off by default ("Allow the garage
+  door pulses (open and close)"); one queue per controller, a close cancels
+  a pending opening. From firmware 1.0.7, `close=1` / `open=1` let the
+  controller check the door again on its own sensor; `click=1` before.
+- Without Security+, a distance the controller rejects (0, above 500 cm, or
+  none) makes the door unknown: nothing published, both buttons refused.
+- After a pulse, another one waits until a read sent after it shows the door
+  where it was sent, at least 15 s and at most 45 s after it. The guard is
+  set and saved before the first byte leaves, so a restart keeps it.
 - Commands sent within 3.5 s or refused unsent, "sent, without confirmation"
   when no answer came back.
-- Device key refused: openings held (15 min, 1 h, 6 h, then every 24 h),
-  reads and closing go on; another key is tried at once. The key is never
-  logged nor stored.
-- Never read sooner than the refresh interval, after a restart included;
-  HTTP 429 or 5xx: a pause of 1 min to 6 h; other failures: 30 s to 5 min.
+- Device key refused: pulses held (15 min, 1 h, 6 h, then every 24 h), reads
+  go on; another key is tried at once. The key is never logged nor stored, and
+  a key that works on any controller is never fingerprinted in `/data`.
+- Never read sooner than the refresh interval, after a restart included (the
+  status then shows the outcome of the last read); HTTP 429 or 5xx: a pause
+  of 1 min to 6 h; other failures: 30 s to 5 min.
 - "Check the controllers" action; reachability on the transport badge; states
   within the Gladys rate limit, measurements spaced by a minute.

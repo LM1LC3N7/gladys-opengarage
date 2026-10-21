@@ -5,12 +5,14 @@
 //     before the first poll, and a created device never loses a feature;
 //   - the pauses asked by a controller (429/5xx), per address;
 //   - the device keys REFUSED by a controller: a salted fingerprint only
-//     (never the key, never a fingerprint of a key that works), removed at
-//     the first success, so a wrong key is never replayed in a loop;
-//   - the guard after the last pulse of each door (a restart never lets a
-//     second pulse stop a moving door);
+//     (never the key, never a fingerprint of a key that works on any
+//     controller), removed at any success of that key, so a wrong key is
+//     never replayed in a loop;
+//   - the guard of the last pulse of each door, with the time it left (a
+//     restart never lets a second pulse stop a moving door);
 //   - the time of the last read (written at most once a minute), so a
-//     restart never reads sooner than the interval.
+//     restart never reads sooner than the interval, and the outcome of the
+//     last read of each address (the status until the first read).
 // -----------------------------------------------------------------------------
 
 import { randomBytes } from 'node:crypto';
@@ -32,6 +34,7 @@ export const emptyData = () => ({
   blocks: {},
   keyBlocks: {},
   guards: {},
+  lastReads: {},
 });
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -117,11 +120,27 @@ export function sanitize(data, now = Date.now()) {
       ) {
         continue;
       }
+      // `at`: when the pulse left (only a read sent after it lifts the
+      // guard); unknown or in the future: now, the safe side. The request
+      // numbers of before the restart mean nothing now: dropped.
       base.guards[id] = {
         from: guard.from,
         expect: guard.expect,
+        at: Number.isFinite(guard.at) ? Math.min(guard.at, now) : now,
         until: Math.min(guard.until, now + TIMINGS.doorGuard),
       };
+    }
+  }
+  if (isObject(data.lastReads)) {
+    for (const [address, read] of Object.entries(data.lastReads).slice(0, LIMITS.addresses)) {
+      if (parseAddress(address) !== address || !isObject(read) || typeof read.ok !== 'boolean') {
+        continue;
+      }
+      const at = Number.isFinite(read.at) ? Math.min(read.at, now) : now;
+      base.lastReads[address] =
+        read.ok && typeof read.id === 'string' && DEVICE_ID.test(read.id)
+          ? { ok: true, id: read.id, at }
+          : { ok: false, at };
     }
   }
   return base;

@@ -60,10 +60,13 @@ test/                             node --test, against the SDK's fake Gladys and
 - **Safety.** The door is never a `switch` nor a commandable `binary`. The
   relay is a toggle: a pulse is decided on `/jc` read just now (MAC checked),
   "open" only from closed, "close" only from open, never from a moving,
-  stopped or unknown door. Opening stays off by default, checked on arrival,
-  after the read and in `beforeSend`; closing is never blocked by the option,
-  the queue or a pause, and cancels what waits. A guard follows every pulse.
-  Keep the tests that say so.
+  stopped or unknown door (an invalid distance without Security+ is
+  unknown). Closing is the same pulse as opening: BOTH stay off by default
+  (`allow_open`), checked on arrival, after the read and in `beforeSend`;
+  one queue per controller, a close cancels the openings not sent yet.
+  `close=1` / `open=1` from `fwv` 107, `click=1` before. A guard is set in
+  `beforeSend` and lifted only by a read sent after the pulse, 15 s at
+  least. Keep the tests that say so.
 - **The device key** is never logged, never in a status, an error or `/data`
   (it travels in the `/cc` query string: never log a path). A `secret` field
   is kept by Gladys in its database, never shown again: never write that it

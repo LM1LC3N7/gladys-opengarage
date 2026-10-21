@@ -40,6 +40,8 @@ export function controllers() {
 /**
  * The `request` of OpenGarageClient over the fake controllers.
  * - `hold(address, prefix)`: the next request to it waits for `release()`;
+ * - `freeze(address, '/jc')`: the next read answers, on release, the state
+ *   it had when it left (a late answer);
  * - `fail(address, prefix, error | { status, headers, body })`: the next one fails;
  *   `{ before: true }`: before the connection (nothing sent).
  * A click toggles `door` (0 <-> 1) unless `moves` is false.
@@ -56,6 +58,13 @@ export function fakeNetwork(table = controllers()) {
     const hold = holds.find((h) => matches(h, address, path));
     if (hold) {
       hold.used = true;
+      if (hold.snapshot && path === '/jc') {
+        // A late answer: the state when the request LEFT, delivered on release.
+        const snapshot = structuredClone(table[address].jc);
+        calls.push({ address, path });
+        await hold.promise;
+        return { status: 200, headers: {}, body: Buffer.from(JSON.stringify(snapshot)) };
+      }
       await hold.promise;
     }
     const device = table[address];
@@ -102,10 +111,24 @@ export function fakeNetwork(table = controllers()) {
       if (url.searchParams.get('dkey') !== device.key) {
         return json({ result: 2 });
       }
-      if (url.searchParams.get('click') === '1') {
+      const toggle = () => {
         if (device.moves !== false) {
           device.jc.door = device.jc.door === 0 ? 1 : 0;
         }
+      };
+      if (url.searchParams.get('click') === '1') {
+        toggle();
+        return json({ result: 1 });
+      }
+      // From 1.0.7: the controller answers first, then pulses only if ITS
+      // reading matches (close: open or stopped; open: closed or closing).
+      const direct = device.jc.fwv >= 107;
+      if (direct && url.searchParams.get('close') === '1') {
+        if (device.jc.door === 1 || device.jc.door === 2) toggle();
+        return json({ result: 1 });
+      }
+      if (direct && url.searchParams.get('open') === '1') {
+        if (device.jc.door === 0 || device.jc.door === 3) toggle();
         return json({ result: 1 });
       }
       return json({ result: 16 });
@@ -122,6 +145,15 @@ export function fakeNetwork(table = controllers()) {
         release = resolve;
       });
       holds.push({ address, prefix, promise });
+      return release;
+    },
+    /** The next /jc answers the state of its departure, on release. */
+    freeze(address, prefix) {
+      let release;
+      const promise = new Promise((resolve) => {
+        release = resolve;
+      });
+      holds.push({ address, prefix, promise, snapshot: true });
       return release;
     },
     fail(address, prefix, failure, { before = false } = {}) {

@@ -35,6 +35,15 @@ export const T = {
       `${answering} of ${known} OpenGarage controller(s) answer.`,
       `${answering} contrôleur(s) OpenGarage sur ${known} répond(ent).`,
     ),
+  restored: (ok, known, seconds) =>
+    both(
+      `${ok} of ${known} OpenGarage controller(s) answered the last read before the restart; next read within ${seconds} s.`,
+      `${ok} contrôleur(s) OpenGarage sur ${known} avai(en)t répondu à la dernière lecture avant le redémarrage ; prochaine lecture d'ici ${seconds} s.`,
+    ),
+  pulsesOff: both(
+    'Pulses off ("Allow the garage door pulses"): the doors are only read, Open and Close are refused.',
+    'Impulsions désactivées (« Autoriser les impulsions de la porte de garage ») : les portes sont seulement lues, Ouvrir et Fermer sont refusés.',
+  ),
   waiting: both(
     'Waiting for the first read of the controllers.',
     'En attente de la première lecture des contrôleurs.',
@@ -56,8 +65,8 @@ export const T = {
   },
   keyRefused: (list) =>
     both(
-      `Device key refused by ${list.join(', ')}: check it in the settings of the controller (openings refused for a while; saving another key tries again).`,
-      `Clé de l'appareil refusée par ${list.join(', ')} : vérifiez-la dans les réglages du contrôleur (ouvertures refusées pendant un temps ; enregistrer une autre clé réessaie).`,
+      `Device key refused by ${list.join(', ')}: check it in the settings of the controller (pulses refused for a while; saving another key tries again).`,
+      `Clé de l'appareil refusée par ${list.join(', ')} : vérifiez-la dans les réglages du contrôleur (impulsions refusées pendant un temps ; enregistrer une autre clé réessaie).`,
     ),
   paused: (list) =>
     both(
@@ -113,8 +122,12 @@ export const ERRORS = {
     "Contrôleur inconnu, ou plus à son adresse : rien n'a été envoyé.",
   ),
   openDisabled: both(
-    'Opening the garage door is disabled in the configuration ("Allow opening the garage door"): nothing sent.',
-    "L'ouverture de la porte de garage est désactivée dans la configuration (« Autoriser l'ouverture de la porte de garage ») : rien n'a été envoyé.",
+    'The garage door pulses are disabled in the configuration ("Allow the garage door pulses (open and close)"): nothing sent.',
+    "Les impulsions de la porte de garage sont désactivées dans la configuration (« Autoriser les impulsions de la porte de garage (ouvrir et fermer) ») : rien n'a été envoyé.",
+  ),
+  closeDisabled: both(
+    'Closing sends the same pulse as opening (a door that moved since it was read would open): it needs "Allow the garage door pulses (open and close)" in the configuration. Nothing sent.',
+    "Fermer envoie la même impulsion qu'ouvrir (une porte qui a bougé depuis sa lecture s'ouvrirait) : il faut « Autoriser les impulsions de la porte de garage (ouvrir et fermer) » dans la configuration. Rien n'a été envoyé.",
   ),
   noKey: both(
     'No usable device key in the configuration: nothing sent.',

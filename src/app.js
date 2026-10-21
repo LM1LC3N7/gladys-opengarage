@@ -20,25 +20,33 @@
 //
 // Commands (open, close: buttons, never a switch). The relay of an
 // OpenGarage is a TOGGLE: one pulse opens a closed door, closes an open one,
-// and stops or reverses a moving one. So:
+// and stops or reverses a moving one. From firmware 1.0.7 (fwv >= 107) the
+// controller also takes `close=1` / `open=1` and decides on its own sensor
+// when the request arrives; older ones get `click=1`. So:
 //   - every pulse is decided on /jc read just now, after checking the MAC:
 //     "open" is only sent to a door read closed, "close" only to a door read
-//     open; already there: nothing sent; moving, stopped or unknown: refused;
-//   - opening is refused unless "Allow opening" is on: checked on arrival,
+//     open; already there: nothing sent; moving, stopped, unknown, or a
+//     distance the controller itself rejects (0 or > 500 cm, which freezes
+//     its `door`): refused;
+//   - BOTH need "Allow the garage door pulses" (allow_open, off by default):
+//     a close is the same pulse as an open on a door that changed meanwhile
+//     (as the step-by-step gateBox of gladys-blebox). Checked on arrival,
 //     after the fresh read and right before the request leaves (beforeSend);
-//   - closing is always allowed (a pulse sent to a door read open closes it),
-//     never behind the queue, one try even during a pause, and cancels an
-//     opening still waiting to leave;
-//   - after every pulse that may have left, a guard (persisted in /data)
-//     refuses any other pulse until the door is read where that pulse sends
-//     it, or 45 s: never lifted on an unknown, moving or unchanged state;
-//     one pulse in flight at a time;
+//   - one queue per controller; a close cancels, on arrival, the openings
+//     not sent yet (queued ones included); a 429/5xx pause or a refused key
+//     holds both;
+//   - a guard is set in beforeSend (persisted at once, with the time the
+//     pulse left) and refuses any other pulse until a read STARTED after the
+//     pulse shows the door where it was sent, at least 15 s after the pulse,
+//     or 45 s; never lifted on an unknown, moving or unchanged state;
+//     removed only when the controller surely did nothing (result != 1, 4xx);
 //   - sent within 3.5 s of the click or refused unsent; answered by 4.3 s; a
 //     request that may have reached the controller is never answered "not
 //     sent": "sent, without confirmation", then reads; never retried;
-//   - a device key refused (result 2) holds the openings of that controller
+//   - a device key refused (result 2) holds the pulses of that controller
 //     with that key (15 min, 1 h, 6 h, then every 24 h; another key at once),
-//     never the reads, and never a close;
+//     never the reads; a key that works on any controller is never
+//     fingerprinted in /data;
 //   - the ack never waits for a publication to Gladys; the key is never in a
 //     log line, a status, an error or /data.
 // -----------------------------------------------------------------------------
@@ -46,7 +54,15 @@
 import { createHmac } from 'node:crypto';
 import { DEVICE_TRANSPORTS, createLogger } from '@gladysassistant/integration-sdk';
 import { generationKey, normalizeConfig, numberOf } from './config.js';
-import { BUTTON_PUSH, DOOR, EXTERNAL_ID_TYPE, LIMITS, RESULT, TIMINGS } from './constants.js';
+import {
+  BUTTON_PUSH,
+  DOOR,
+  EXTERNAL_ID_TYPE,
+  LIMITS,
+  RESULT,
+  TIMINGS,
+  TOGGLE_FREE_FIRMWARE,
+} from './constants.js';
 import { ERRORS, T, join, word } from './i18n.js';
 import { buildDevice, featuresOf, valuesOf } from './model.js';
 import { StatePublisher } from './publisher.js';
@@ -134,6 +150,12 @@ export class OpenGarageApp {
     this.saving = Promise.resolve();
     this.lastStatus = undefined;
     this.warned = new Set();
+    /** Fingerprints (memory only) of the keys a controller accepted. */
+    this.goodKeys = new Set();
+    /** id -> hold of a refused key that works elsewhere (never in /data) */
+    this.memoryKeyBlocks = new Map();
+    /** Every request gets a number: a guard is lifted only by a read sent after its pulse. */
+    this.sequence = 0;
   }
 
   // --- Lifecycle -------------------------------------------------------------
@@ -146,6 +168,7 @@ export class OpenGarageApp {
     const first = !this.data;
     if (first) {
       this.data = await this.store.load().catch(() => emptyData());
+      this.data.lastReads ??= {};
     }
     this.config = normalizeConfig(raw);
     if (first && this.data.lastTry !== undefined) {
@@ -280,7 +303,7 @@ export class OpenGarageApp {
 
   /** The block of the current key on a controller, if it refused it lately. */
   keyBlockOf(record) {
-    const block = this.data.keyBlocks[record.id];
+    const block = this.data.keyBlocks[record.id] ?? this.memoryKeyBlocks.get(record.id);
     if (!block || !this.config.key || block.until <= this.now()) {
       return undefined;
     }
@@ -289,19 +312,39 @@ export class OpenGarageApp {
 
   onKeyRefused(record, key) {
     const fingerprint = this.fingerprint(key);
-    const previous = this.data.keyBlocks[record.id];
+    const previous = this.data.keyBlocks[record.id] ?? this.memoryKeyBlocks.get(record.id);
     const failures = previous?.fingerprint === fingerprint ? previous.failures + 1 : 1;
     const wait = TIMINGS.keyRetries[Math.min(failures, TIMINGS.keyRetries.length) - 1];
-    this.data.keyBlocks[record.id] = { fingerprint, failures, until: this.now() + wait };
+    const block = { fingerprint, failures, until: this.now() + wait };
+    if (this.goodKeys.has(fingerprint)) {
+      // The same key works on another controller (one key for all): its
+      // fingerprint never goes to /data, the hold stays in memory.
+      delete this.data.keyBlocks[record.id];
+      this.memoryKeyBlocks.set(record.id, block);
+    } else {
+      this.data.keyBlocks[record.id] = block;
+    }
     this.warnOnce(`key:${record.id}:${failures}`, `OpenGarage ${record.id}: device key refused`);
     this.save();
     this.updateStatus();
   }
 
-  onKeyAccepted(record) {
-    if (this.data.keyBlocks[record.id]) {
-      // Never a fingerprint of a key that works.
-      delete this.data.keyBlocks[record.id];
+  /** A key accepted by any controller: no fingerprint of it is kept in /data. */
+  onKeyAccepted(record, key) {
+    const fingerprint = this.fingerprint(key);
+    this.goodKeys.add(fingerprint);
+    this.memoryKeyBlocks.delete(record.id);
+    let changed = false;
+    for (const [id, block] of Object.entries(this.data.keyBlocks)) {
+      if (id === record.id || block.fingerprint === fingerprint) {
+        delete this.data.keyBlocks[id];
+        if (id !== record.id) {
+          this.memoryKeyBlocks.set(id, block);
+        }
+        changed = true;
+      }
+    }
+    if (changed) {
       this.save();
     }
   }
@@ -382,6 +425,8 @@ export class OpenGarageApp {
     const status = this.statusOf(address);
     status.lastTry = this.now();
     this.markTry();
+    // When this request left: it can only lift a guard of a pulse sent before it.
+    const origin = { seq: this.nextSequence(), at: this.now() };
     let data;
     try {
       data = await this.client.variables(address);
@@ -410,6 +455,7 @@ export class OpenGarageApp {
     status.next = status.lastTry + this.interval;
     status.error = undefined;
     status.id = identity.id;
+    this.rememberRead(address, { ok: true, id: identity.id, at: status.lastTry });
     const changed = this.remember(identity, address, layoutOf(data));
     const record = this.data.devices[identity.id];
     if (record?.address !== address) {
@@ -417,16 +463,30 @@ export class OpenGarageApp {
       return changed;
     }
     const reading = readingOf(data);
-    this.liftGuard(record, reading);
+    this.liftGuard(record, reading, origin);
     this.recordValues(record, reading);
     this.setReachable(record, true);
     return changed;
+  }
+
+  /**
+   * The outcome of the last read of an address, kept in /data with lastTry
+   * (the status after a restart, before the first read): written with the
+   * once-a-minute save, or at once when it changes.
+   */
+  rememberRead(address, outcome) {
+    const previous = this.data.lastReads[address];
+    this.data.lastReads[address] = outcome;
+    if (previous?.ok !== outcome.ok || previous?.id !== outcome.id) {
+      this.persist();
+    }
   }
 
   failed(address, status, error) {
     status.failures += 1;
     status.error = error;
     status.id = undefined;
+    this.rememberRead(address, { ok: false, at: status.lastTry });
     const wait = TIMINGS.backoff[Math.min(status.failures, TIMINGS.backoff.length) - 1];
     status.next = status.lastTry + Math.max(wait, this.interval);
     for (const record of this.records) {
@@ -663,8 +723,21 @@ export class OpenGarageApp {
     } else {
       const answering = typed.filter((a) => this.addresses.get(a)?.id).length;
       const tried = typed.filter((a) => this.addresses.get(a)?.lastTry !== undefined).length;
-      connected = answering > 0;
-      parts.push(tried === 0 ? T.waiting : T.status(answering, typed.length));
+      if (tried > 0) {
+        connected = answering > 0;
+        parts.push(T.status(answering, typed.length));
+      } else {
+        // After a restart, before the first read (never sooner than the
+        // interval): the outcome of the last read kept in /data.
+        const restored = typed.filter((a) => this.data.lastReads[a]?.ok).length;
+        connected = restored > 0;
+        parts.push(
+          restored > 0 ? T.restored(restored, typed.length, this.config.pollInterval) : T.waiting,
+        );
+      }
+      if (!this.config.allowOpen) {
+        parts.push(T.pulsesOff);
+      }
     }
     const { invalidAddresses, keyProblem } = this.config;
     if (invalidAddresses.length > 0) {
@@ -764,21 +837,22 @@ export class OpenGarageApp {
     const action = target.key === 'open' ? this.openAction(record) : this.closeAction(record);
     this.checkOption(action);
     const ticket = { action, cancelled: false, sent: false, generation: this.generation };
-    if (action.protective) {
-      // An opening still waiting to leave is cancelled on arrival, before
+    if (action.cancelsOpening) {
+      // The openings still waiting to leave are cancelled on arrival, before
       // any queue, queued ones included. Cancelling never sends anything.
       for (const pending of this.tickets.get(record.id) ?? []) {
         if (!pending.sent) {
           pending.cancelled = true;
         }
       }
-      // Never behind the queue.
-      return this.run(record, action, received, ticket);
+    } else {
+      if (!this.tickets.has(record.id)) {
+        this.tickets.set(record.id, new Set());
+      }
+      this.tickets.get(record.id).add(ticket);
     }
-    if (!this.tickets.has(record.id)) {
-      this.tickets.set(record.id, new Set());
-    }
-    this.tickets.get(record.id).add(ticket);
+    // One queue per controller: a close waits behind a pulse in progress
+    // (which it has cancelled if it had not left), never beside it.
     const previous = this.queues.get(record.id) ?? Promise.resolve();
     const run = previous.then(() => this.run(record, action, received, ticket));
     const tail = run.catch(() => {});
@@ -795,53 +869,73 @@ export class OpenGarageApp {
 
   /** The permission of a command, read now from the current configuration. */
   checkOption(action) {
-    if (action.option === 'open' && !this.config.allowOpen) {
-      throw this.refusal(ERRORS.openDisabled);
+    if (!this.config.allowOpen) {
+      // Closing is the same pulse as opening (a door that changed since it
+      // was read): both need the permission.
+      throw this.refusal(action.key === 'open' ? ERRORS.openDisabled : ERRORS.closeDisabled);
     }
     if (!this.config.key) {
       throw this.refusal(ERRORS.noKey);
     }
   }
 
-  /** Open: a pulse only to a door read closed, behind the option. */
+  /** Open: a pulse only to a door read closed. */
   openAction(record) {
     return {
+      key: 'open',
       name: 'open (pulse)',
-      option: 'open',
-      plan: (reading) => {
-        this.checkGuard(record, reading);
+      plan: (reading, origin) => {
+        this.checkGuard(record, reading, origin);
         if (reading.door === DOOR.OPEN) return { unchanged: true };
         if (reading.door !== DOOR.CLOSED) throw this.refusal(ERRORS.notClosed);
-        return { from: DOOR.CLOSED, expect: DOOR.OPEN };
+        return { from: DOOR.CLOSED, expect: DOOR.OPEN, command: 'open' };
       },
     };
   }
 
-  /** Close: a pulse only to a door read open; always allowed, first in line. */
+  /** Close: a pulse only to a door read open; it cancels the pending openings. */
   closeAction(record) {
     return {
+      key: 'close',
       name: 'close (pulse)',
-      protective: true,
-      plan: (reading) => {
-        this.checkGuard(record, reading);
+      cancelsOpening: true,
+      plan: (reading, origin) => {
+        this.checkGuard(record, reading, origin);
         if (reading.door === DOOR.CLOSED) return { unchanged: true };
         if (reading.door !== DOOR.OPEN) throw this.refusal(ERRORS.notOpen);
-        return { from: DOOR.OPEN, expect: DOOR.CLOSED };
+        return { from: DOOR.OPEN, expect: DOOR.CLOSED, command: 'close' };
       },
     };
+  }
+
+  nextSequence() {
+    this.sequence += 1;
+    return this.sequence;
   }
 
   /**
-   * After a pulse that may have left, no other one until the door is read
-   * where that pulse sends it (never lifted on an unknown, moving, stopped
-   * or unchanged state), or the guard expires.
+   * Whether a read lifts the guard: it shows the door where the pulse sent
+   * it, it LEFT after the pulse (an answer generated before it says nothing
+   * of it), and the door had the time to move away from its sensor reading
+   * (a distance sensor sees the expected state before the end of travel).
+   * The guard also ends 45 s after the pulse.
    */
-  checkGuard(record, reading) {
+  guardLifted(guard, reading, origin) {
+    if (this.now() >= guard.until) {
+      return true;
+    }
+    // In memory, the request numbers; after a restart (no number), the times.
+    const after = guard.seq === undefined ? origin.at > guard.at : origin.seq > guard.seq;
+    return after && reading.door === guard.expect && this.now() - guard.at >= TIMINGS.doorGuardMin;
+  }
+
+  /** Before a pulse: refused while the guard of the previous one holds. */
+  checkGuard(record, reading, origin) {
     const guard = this.data.guards[record.id];
     if (!guard) {
       return;
     }
-    if (this.now() >= guard.until || reading.door === guard.expect) {
+    if (this.guardLifted(guard, reading, origin)) {
       delete this.data.guards[record.id];
       this.persist();
       return;
@@ -849,23 +943,38 @@ export class OpenGarageApp {
     throw this.refusal(ERRORS.justCommanded);
   }
 
-  /** A read that shows the door where the last pulse sent it lifts the guard. */
-  liftGuard(record, reading) {
+  /** A read (polling, follow-up) may lift the guard, by the same rule. */
+  liftGuard(record, reading, origin) {
     const guard = this.data.guards[record.id];
-    if (guard && (reading.door === guard.expect || this.now() >= guard.until)) {
+    if (guard && this.guardLifted(guard, reading, origin)) {
       delete this.data.guards[record.id];
       this.persist();
     }
   }
 
-  /** The guard after a pulse that may have left: saved at once (a restart keeps it). */
+  /**
+   * The guard of a pulse, set right before it leaves (beforeSend) and saved
+   * at once: a restart while the pulse is out keeps it.
+   */
   guardDoor(record, plan) {
-    this.data.guards[record.id] = {
+    const guard = {
       from: plan.from,
       expect: plan.expect,
+      at: this.now(),
+      seq: this.nextSequence(),
       until: this.now() + TIMINGS.doorGuard,
     };
+    this.data.guards[record.id] = guard;
     this.save();
+    return guard;
+  }
+
+  /** The controller surely did nothing (a refusal): the guard of this pulse goes. */
+  unguardDoor(record, guard) {
+    if (guard && this.data.guards[record.id] === guard) {
+      delete this.data.guards[record.id];
+      this.save();
+    }
   }
 
   /** One command: the fresh read with the identity, the plan, the pulse. */
@@ -890,17 +999,16 @@ export class OpenGarageApp {
         throw this.refusal(ERRORS.unknownDevice);
       }
       // A pause asked by the controller (429, 5xx) and a refused key hold
-      // the openings, never a close (one try).
-      if (!action.protective) {
-        if (this.blockOf(record.address)) throw this.refusal(ERRORS.blocked);
-        if (this.keyBlockOf(record)) throw this.refusal(ERRORS.keyRefused);
-      }
+      // every pulse (a close is a pulse too).
+      if (this.blockOf(record.address)) throw this.refusal(ERRORS.blocked);
+      if (this.keyBlockOf(record)) throw this.refusal(ERRORS.keyRefused);
       if (this.now() > sendBy) throw this.refusal(ERRORS.tooSlow);
     };
     check();
     const address = record.address;
     const left = () => sendBy - this.now() - 200;
     let data;
+    const origin = { seq: this.nextSequence(), at: this.now() };
     try {
       if (left() <= 0) throw this.refusal(ERRORS.tooSlow);
       data = await this.client.variables(address, { timeout: left() });
@@ -936,13 +1044,12 @@ export class OpenGarageApp {
     // Cancelled or no longer allowed while it read: said so before any other reason.
     check();
     // One pulse at a time: a second one would stop or reverse the door, and
-    // the state just read does not show a pulse still in flight ("already
-    // closed" while an opening leaves would be a lie).
+    // the state just read does not show a pulse still in flight.
     const flying = this.flights.get(record.id);
     if (flying && flying !== ticket) {
       throw this.refusal(ERRORS.justCommanded);
     }
-    const plan = action.plan(reading);
+    const plan = action.plan(reading, origin);
     if (plan.unchanged) {
       // Already there: nothing sent.
       return;
@@ -951,16 +1058,22 @@ export class OpenGarageApp {
     check();
     // Taken now: a key changed later starts a new generation, refused in beforeSend.
     const key = this.config.key;
-    this.logger.info(`OpenGarage ${record.id}: ${action.name}`);
+    // From firmware 1.0.7, `close=1` / `open=1`: the controller checks the
+    // door again on its own sensor when the request arrives; else the toggle.
+    const command = reading.firmware >= TOGGLE_FREE_FIRMWARE ? plan.command : 'click';
+    this.logger.info(`OpenGarage ${record.id}: ${action.name} (${command})`);
+    let guard;
     let result;
     try {
-      result = await this.client.click(address, key, {
+      result = await this.client.command(address, key, command, {
         timeout: Math.max(100, answerBy - this.now()),
         sendWithin: sendBy - this.now(),
-        // The very last check, right before the request leaves.
+        // The very last check, right before the request leaves; the guard
+        // is set (and saved) before the first byte.
         beforeSend: () => {
           check();
           ticket.sent = true;
+          guard = this.guardDoor(record, plan);
         },
       });
     } catch (err) {
@@ -969,31 +1082,33 @@ export class OpenGarageApp {
       }
       const reason = reasonOf(err);
       if (!err.sent) {
+        this.unguardDoor(record, guard);
         this.logger.warn(`OpenGarage ${record.id}: ${action.name} NOT sent (${reason})`);
         throw this.refusal(err.kind === 'late' ? ERRORS.tooSlow : ERRORS.notSent(reason));
       }
       this.onFailure(address, err);
       this.followUp(record);
       if (err.kind === 'http' && err.status >= 400 && err.status <= 499) {
+        this.unguardDoor(record, guard);
         this.logger.warn(`OpenGarage ${record.id}: ${action.name} refused (${reason})`);
         throw this.refusal(ERRORS.refusedHttp(reason));
       }
       // A silence, a dropped connection, a 5xx, an answer without a result:
-      // the pulse may have reached the controller.
-      this.guardDoor(record, plan);
+      // the pulse may have reached the controller, the guard stays.
       this.logger.warn(`OpenGarage ${record.id}: ${action.name} sent, NOT confirmed (${reason})`);
       throw this.refusal(ERRORS.sentUnconfirmed(reason));
     }
     if (result === RESULT.UNAUTHORIZED) {
+      this.unguardDoor(record, guard);
       this.onKeyRefused(record, key);
       throw this.refusal(ERRORS.keyRefusedNow);
     }
     if (result !== RESULT.SUCCESS) {
+      this.unguardDoor(record, guard);
       this.logger.warn(`OpenGarage ${record.id}: ${action.name} refused (code ${result})`);
       throw this.refusal(ERRORS.refused(result));
     }
-    this.onKeyAccepted(record);
-    this.guardDoor(record, plan);
+    this.onKeyAccepted(record, key);
     this.followUp(record);
   }
 

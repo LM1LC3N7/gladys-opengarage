@@ -25,6 +25,20 @@ export const DOOR = { CLOSED: 0, OPEN: 1, STOPPED: 2, CLOSING: 3, OPENING: 4, UN
 /** `vehicle` of /jc: 0 absent, 1 present, 2 unknown (door open), 3 detection disabled. */
 export const VEHICLE = { ABSENT: 0, PRESENT: 1, UNKNOWN: 2, DISABLED: 3 };
 
+/**
+ * From this firmware (`fwv` 107 = 1.0.7, release notes: "explicit open and
+ * close options") /cc takes `close=1` and `open=1`: the controller only
+ * pulses when its own sensor reads the door in the matching state (and on
+ * Security+ 2.0 they are directional). Older ones only have `click=1`.
+ */
+export const TOGGLE_FREE_FIRMWARE = 107;
+
+/**
+ * Without Security+, the controller ignores a distance of 0 or above this
+ * (cm) and keeps its last `door`: the door is then unknown.
+ */
+export const DISTANCE_VALID_MAX = 500;
+
 /** `result` of /cc (OpenGarage firmware HTML_* codes). */
 export const RESULT = { SUCCESS: 1, UNAUTHORIZED: 2, MISMATCH: 3 };
 
@@ -65,6 +79,13 @@ export const TIMINGS = {
    * would stop or reverse a moving door.
    */
   doorGuard: 45_000,
+  /**
+   * The expected state lifts the guard only this long after the pulse: a
+   * distance sensor sees it before the end of travel (the panel leaves the
+   * sensor half way down, reaches it before the top stop), and the
+   * controller's own alarm may delay the relay by 5 to 10 s.
+   */
+  doorGuardMin: 15_000,
   /** Transient failures: the next reads, never sooner than the interval. */
   backoff: [30_000, 60_000, 120_000, 300_000],
   /** Device key refused: the next openings allowed after these, then every 24 h. */

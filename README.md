@@ -30,13 +30,16 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (OpenGarageApp)
   identified again at every read and before every pulse.
 - **Polling** every `poll_interval` seconds, never sooner (reconnection,
   configuration saved unchanged, scan, "Check" button, restart).
-- **Commands**: `GET /cc?dkey=<key>&click=1`, one pulse of a **toggle** relay.
-  "Open" is sent only to a door read closed just now, "Close" only to a door
-  read open; moving, stopped or unknown is refused. Opening is off by default;
-  closing is always allowed, never queued, and cancels a pending opening.
-  After each pulse a guard (persisted) refuses another one until the door is
-  read where the pulse sent it, or 45 s. See
-  [docs/en.md](docs/en.md#command-safety).
+- **Commands**: `GET /cc?dkey=<key>&close=1` / `&open=1` from firmware 1.0.7
+  (the controller checks again on its own sensor), `&click=1` (the **toggle**)
+  before. "Open" is sent only to a door read closed just now, "Close" only to
+  a door read open; moving, stopped, unknown, or a distance the controller
+  rejects (0, > 500 cm) is refused. Closing is the same pulse as opening, so
+  BOTH are off by default ("Allow the garage door pulses"), queued per
+  controller, and a close cancels a pending opening. After each pulse a
+  guard, set before the first byte and persisted, refuses another one until
+  a read sent after the pulse shows the door where it was sent (15 s at
+  least, 45 s at most). See [docs/en.md](docs/en.md#command-safety).
 - **The device key** is never logged, nor put in a status, an error or
   `/data` (only a salted fingerprint of a key a controller refused, removed at
   the first success).

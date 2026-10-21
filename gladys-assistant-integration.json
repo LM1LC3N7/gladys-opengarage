@@ -27,30 +27,45 @@
       "links": [
         {
           "url": "https://github.com/LM1LC3N7/gladys-opengarage/blob/main/docs/fr.md",
-          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
         },
         {
           "url": "https://github.com/LM1LC3N7/gladys-opengarage/blob/main/docs/en.md",
-          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
       "key": "addresses",
       "type": "string",
-      "label": { "en": "IP addresses of the controllers", "fr": "Adresses IP des contrôleurs" },
+      "label": {
+        "en": "IP addresses of the controllers",
+        "fr": "Adresses IP des contrôleurs"
+      },
       "description": {
         "en": "Separated by commas, for example 192.168.1.50, 192.168.1.51 (add :port if it is not 80).",
         "fr": "Séparées par des virgules, par exemple 192.168.1.50, 192.168.1.51 (ajoutez :port s'il n'est pas 80)."
       },
-      "placeholder": { "en": "192.168.1.50", "fr": "192.168.1.50" },
+      "placeholder": {
+        "en": "192.168.1.50",
+        "fr": "192.168.1.50"
+      },
       "required": false,
       "default": ""
     },
     {
       "key": "device_key",
       "type": "secret",
-      "label": { "en": "Device key", "fr": "Clé de l'appareil" },
+      "label": {
+        "en": "Device key",
+        "fr": "Clé de l'appareil"
+      },
       "description": {
         "en": "The device key set in the controller (\"opendoor\" until you change it: change it). The same for every controller. Only needed to open and close. Kept by Gladys in its database, never shown again, sent only to your OpenGarage controllers (in clear on your local network: they have no https).",
         "fr": "La clé de l'appareil réglée dans le contrôleur (« opendoor » tant que vous ne la changez pas : changez-la). La même pour tous les contrôleurs. Seulement nécessaire pour ouvrir et fermer. Ce champ est gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement à vos contrôleurs OpenGarage (en clair sur votre réseau local : ils n'ont pas de https)."
@@ -60,7 +75,10 @@
     {
       "key": "poll_interval",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Refresh interval (s)",
+        "fr": "Intervalle de rafraîchissement (s)"
+      },
       "description": {
         "en": "How often each controller is read, in seconds. Never sooner, even after a restart.",
         "fr": "Fréquence de lecture de chaque contrôleur, en secondes. Jamais plus souvent, même après un redémarrage."
@@ -73,22 +91,25 @@
     {
       "key": "door_section",
       "type": "section",
-      "label": { "en": "Opening and closing", "fr": "Ouverture et fermeture" },
+      "label": {
+        "en": "Opening and closing",
+        "fr": "Ouverture et fermeture"
+      },
       "description": {
-        "en": "The door is shown with two buttons, never as a switch. The relay of an OpenGarage is a toggle: the same pulse opens a closed door, closes an open one, and stops or reverses a moving one. So Gladys reads the door just before each pulse: \"Open\" is only sent to a door read closed, \"Close\" only to a door read open; moving, stopped or unknown: refused. After a pulse, the next one is refused until the door is read where it was sent (45 s at most). Closing is always allowed; opening is refused until you allow it below.",
-        "fr": "La porte est affichée avec deux boutons, jamais comme un interrupteur. Le relais d'un OpenGarage est une bascule : la même impulsion ouvre une porte fermée, ferme une porte ouverte, et arrête ou inverse une porte en mouvement. Gladys lit donc la porte juste avant chaque impulsion : « Ouvrir » n'est envoyé qu'à une porte lue fermée, « Fermer » qu'à une porte lue ouverte ; en mouvement, arrêtée ou inconnue : refusé. Après une impulsion, la suivante est refusée tant que la porte n'est pas lue là où elle a été envoyée (45 s au plus). Fermer est toujours permis ; ouvrir est refusé tant que vous ne l'autorisez pas ci-dessous."
+        "en": "The door has two buttons, never a switch. The relay of an OpenGarage is a toggle: the same pulse opens a closed door, closes an open one, and stops or reverses a moving one, so closing can open a door that moved since it was read. Both buttons are therefore refused until you allow the pulses below. Gladys reads the door just before each pulse: \"Open\" only to a door read closed, \"Close\" only to a door read open; moving, stopped or unknown: refused. From firmware 1.0.7 the controller checks again on its own sensor (open=1 / close=1). After a pulse, the next one waits until the door is read where it was sent, at least 15 s and at most 45 s later. Without the permission, a scene or a voice assistant \"close the garage\" is refused too.",
+        "fr": "La porte a deux boutons, jamais un interrupteur. Le relais d'un OpenGarage est une bascule : la même impulsion ouvre une porte fermée, ferme une porte ouverte, et arrête ou inverse une porte en mouvement ; fermer peut donc ouvrir une porte qui a bougé depuis sa lecture. Les deux boutons sont donc refusés tant que vous n'autorisez pas les impulsions ci-dessous. Gladys lit la porte juste avant chaque impulsion : « Ouvrir » seulement vers une porte lue fermée, « Fermer » seulement vers une porte lue ouverte ; en mouvement, arrêtée ou inconnue : refusé. Depuis le micrologiciel 1.0.7, le contrôleur revérifie sur son propre capteur (open=1 / close=1). Après une impulsion, la suivante attend que la porte soit lue là où elle a été envoyée, 15 s au moins et 45 s au plus après. Sans l'autorisation, une scène ou un assistant vocal « ferme le garage » est refusé aussi."
       }
     },
     {
       "key": "allow_open",
       "type": "boolean",
       "label": {
-        "en": "Allow opening the garage door",
-        "fr": "Autoriser l'ouverture de la porte de garage"
+        "en": "Allow the garage door pulses (open and close)",
+        "fr": "Autoriser les impulsions de la porte de garage (ouvrir et fermer)"
       },
       "description": {
-        "en": "Off by default. On: the dashboard, the scenes and the voice assistants can open the garage door.",
-        "fr": "Désactivé par défaut. Activé : le tableau de bord, les scènes et les assistants vocaux peuvent ouvrir la porte de garage."
+        "en": "Off by default: the doors are only read. On: the dashboard, the scenes and the voice assistants can open AND close the garage door (the same pulse).",
+        "fr": "Désactivé par défaut : les portes sont seulement lues. Activé : le tableau de bord, les scènes et les assistants vocaux peuvent ouvrir ET fermer la porte de garage (la même impulsion)."
       },
       "required": false,
       "default": false
@@ -107,15 +128,30 @@
       "required": false,
       "default": "fr",
       "options": [
-        { "value": "fr", "label": { "en": "French", "fr": "Français" } },
-        { "value": "en", "label": { "en": "English", "fr": "Anglais" } }
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
       ]
     }
   ],
   "actions": [
     {
       "key": "check_controllers",
-      "label": { "en": "Check the controllers", "fr": "Vérifier les contrôleurs" },
+      "label": {
+        "en": "Check the controllers",
+        "fr": "Vérifier les contrôleurs"
+      },
       "description": {
         "en": "Shows what each address answered (never read sooner than the refresh interval).",
         "fr": "Affiche ce que chaque adresse a répondu (jamais relue plus vite que l'intervalle de rafraîchissement)."

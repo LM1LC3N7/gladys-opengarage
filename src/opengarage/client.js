@@ -6,6 +6,9 @@
 //   GET /cc?dkey=<key>&click=1     one pulse of the door relay, a TOGGLE:
 //                                  it opens a closed door, closes an open one,
 //                                  and stops or reverses a moving one
+//   GET /cc?dkey=<key>&close=1     from firmware 1.0.7: a pulse only if the
+//   GET /cc?dkey=<key>&open=1      controller itself reads the door open
+//                                  (or stopped) / closed (or closing)
 // answered with JSON ({"result":1} for a command accepted). Every answer is
 // size-capped and parsed once. The device key travels in the query string:
 // the path is never logged nor put in an error.
@@ -29,8 +32,17 @@ export function retryAfterOf(header, now = Date.now()) {
   return Number.isFinite(date) ? Math.max(0, date - now) : undefined;
 }
 
-/** The path of one pulse, the key encoded (never logged). */
-export const clickPath = (key) => `/cc?dkey=${encodeURIComponent(key)}&click=1`;
+const COMMANDS = new Set(['click', 'open', 'close']);
+
+/** The path of one command (`click`, `open`, `close`), the key encoded (never logged). */
+export function commandPath(key, command = 'click') {
+  if (!COMMANDS.has(command)) {
+    throw new OpenGarageError('invalid');
+  }
+  return `/cc?dkey=${encodeURIComponent(key)}&${command}=1`;
+}
+
+export const clickPath = (key) => commandPath(key, 'click');
 
 export class OpenGarageClient {
   constructor({ request = httpRequest, timeout = TIMINGS.requestTimeout, now = Date.now } = {}) {
@@ -87,15 +99,21 @@ export class OpenGarageClient {
   }
 
   /**
-   * One pulse. Resolves the `result` code of the controller (1: accepted,
-   * 2: device key refused...); rejects 'invalid' (sent) when it gives none.
+   * One command (`click`, `open`, `close`). Resolves the `result` code of
+   * the controller (1: received, it answers BEFORE acting; 2: device key
+   * refused...); rejects 'invalid' (sent) when it gives none.
    */
-  async click(address, key, options) {
-    const answer = await this.get(address, clickPath(key), options);
+  async command(address, key, command, options) {
+    const answer = await this.get(address, commandPath(key, command), options);
     const result = Object.hasOwn(answer, 'result') ? answer.result : undefined;
     if (!Number.isInteger(result)) {
       throw new OpenGarageError('invalid', { sent: true });
     }
     return result;
+  }
+
+  /** One toggle pulse. */
+  click(address, key, options) {
+    return this.command(address, key, 'click', options);
   }
 }

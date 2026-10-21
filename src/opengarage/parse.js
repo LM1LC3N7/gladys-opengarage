@@ -9,7 +9,7 @@
 // -----------------------------------------------------------------------------
 
 import { cleanText } from '../config.js';
-import { DOOR, VEHICLE } from '../constants.js';
+import { DISTANCE_VALID_MAX, DOOR, VEHICLE } from '../constants.js';
 
 const own = (data, key) =>
   data !== null && typeof data === 'object' && Object.hasOwn(data, key) ? data[key] : undefined;
@@ -94,13 +94,27 @@ export function mergeLayout(previous = {}, next = {}) {
 
 /**
  * The values of an answer: `{ door, distance, vehicle, rssi, temperature,
- * humidity }`, each undefined when missing or out of range.
+ * humidity, firmware }`, each undefined when missing or out of range.
+ *
+ * Without Security+ (`secv` missing or 0), the door comes from the distance
+ * sensor, and the firmware (check_status) leaves `door` at its last value
+ * when the distance is invalid (0, a sensor timeout, or above 500 cm) while
+ * `/jc` still gives that `dist`: the door is then unknown (never published,
+ * every pulse refused). A missing `dist` says nothing of the door either.
  */
 export function readingOf(data) {
-  const door = integer(own(data, 'door'), 0, 5);
+  const raw = integer(own(data, 'door'), 0, 5);
+  const security = integer(own(data, 'secv'), 0, 255);
+  const dist = boundedNumber(own(data, 'dist'), 0, 2000);
+  const validDistance = dist !== undefined && dist > 0 && dist <= DISTANCE_VALID_MAX;
+  let door = raw === undefined || raw === DOOR.UNKNOWN ? undefined : raw;
+  if (!(security >= 1) && !validDistance) {
+    door = undefined;
+  }
   return {
-    door: door === undefined || door === DOOR.UNKNOWN ? undefined : door,
-    distance: boundedNumber(own(data, 'dist'), 0, 2000),
+    door,
+    distance: validDistance ? dist : undefined,
+    firmware: integer(own(data, 'fwv'), 1, 9999),
     vehicle: integer(own(data, 'vehicle'), 0, 3),
     rssi: integer(own(data, 'rssi'), -127, 0),
     temperature: boundedNumber(own(data, 'temp'), -40, 85),

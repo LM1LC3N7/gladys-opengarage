@@ -72,20 +72,33 @@ test('/jc: the MAC identifies, an odd one is unreadable (never another controlle
 });
 
 test('/jc: values checked, a missing one is undefined, never 0', () => {
-  assert.deepEqual(readingOf({ door: 1, dist: 31, vehicle: 2, rssi: -70, temp: '21.5' }), {
-    door: 1,
-    distance: 31,
-    vehicle: 2,
-    rssi: -70,
-    temperature: 21.5,
-    humidity: undefined,
-  });
+  assert.deepEqual(
+    readingOf({ door: 1, dist: 31, vehicle: 2, rssi: -70, temp: '21.5', fwv: 124 }),
+    {
+      door: 1,
+      distance: 31,
+      firmware: 124,
+      vehicle: 2,
+      rssi: -70,
+      temperature: 21.5,
+      humidity: undefined,
+    },
+  );
   const empty = readingOf({ door: 5, dist: -1, vehicle: 9, rssi: 12, temp: 'NaN', humid: null });
   assert.ok(
     Object.values(empty).every((v) => v === undefined),
     JSON.stringify(empty),
   );
   assert.deepEqual(readingOf('nope'), readingOf({}));
+  // I3: without Security+, a distance the firmware ignores freezes `door`: unknown.
+  for (const dist of [0, 501, 600, undefined, 'x']) {
+    const reading = readingOf({ door: 1, ...(dist === undefined ? {} : { dist }) });
+    assert.equal(reading.door, undefined, `dist ${dist}`);
+    assert.equal(reading.distance, undefined, `dist ${dist}`);
+  }
+  assert.equal(readingOf({ door: 1, dist: 500 }).door, 1);
+  assert.equal(readingOf({ door: 1, dist: 0, secv: 1 }).door, 1, 'Security+: door from the opener');
+  assert.equal(readingOf({ door: 1, secv: 2 }).door, 1);
   assert.deepEqual(layoutOf({ dist: 10, vehicle: 3, rssi: -60 }), {
     distance: true,
     vehicle: false,

@@ -7,7 +7,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { OpenGarageClient, clickPath, retryAfterOf } from '../src/opengarage/client.js';
+import {
+  OpenGarageClient,
+  clickPath,
+  commandPath,
+  retryAfterOf,
+} from '../src/opengarage/client.js';
 
 async function server(t, handler) {
   const received = [];
@@ -30,6 +35,9 @@ const json = (res, value, status = 200, headers = {}) => {
 
 test('the key is encoded in the query string', () => {
   assert.equal(clickPath('a b&c=d'), '/cc?dkey=a%20b%26c%3Dd&click=1');
+  assert.equal(commandPath('k', 'close'), '/cc?dkey=k&close=1');
+  assert.equal(commandPath('k', 'open'), '/cc?dkey=k&open=1');
+  assert.throws(() => commandPath('k', 'reboot'), { kind: 'invalid' });
 });
 
 test('/jc and a click, the result code given back', async (t) => {
