@@ -1,6 +1,6 @@
 {
   "name": "gladys-opengarage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for OpenGarage controllers (garage door state, distance, vehicle, Wi-Fi signal, open and close), over their local HTTP API. Unofficial, not affiliated with OpenGarage.",
   "type": "module",

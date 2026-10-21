@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
 ### Added
 
 - OpenGarage controllers over their local HTTP API, without the cloud: added
@@ -40,3 +42,6 @@ the notes of the version's GitHub Release.
   of 1 min to 6 h; other failures: 30 s to 5 min.
 - "Check the controllers" action; reachability on the transport badge; states
   within the Gladys rate limit, measurements spaced by a minute.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-opengarage/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-opengarage/releases/tag/v0.1.1
