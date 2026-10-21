@@ -1,61 +1,89 @@
-# Demo Devices Template
+# OpenGarage for Gladys Assistant
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+This integration shows your OpenGarage controllers in Gladys and drives your
+garage door through their local HTTP API, on your network, without the
+OpenGarage cloud.
 
-## What you get
+**Never tested with a real device**: the integration follows the firmware API
+and the open-garage library (the one of Home Assistant), but nobody has tried
+it on a real controller yet. Your feedback is welcome.
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+Unofficial integration, not affiliated with OpenGarage.
 
-## Configuration
+## In Gladys
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+| Feature               | Detail                                            |
+| --------------------- | ------------------------------------------------- |
+| Garage door           | open / closed (opening sensor, read only)         |
+| Open / Close          | two buttons, never a switch                       |
+| Distance sensor       | in cm                                             |
+| Vehicle in the garage | present / absent (unknown while the door is open) |
+| Wi-Fi signal          | from 0 to 5                                       |
+| Temperature, humidity | only when a sensor is fitted to the controller    |
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+## Setup
 
-## Actions
+1. Give each controller a fixed IP address in your router.
+2. In the settings of the controller, change the device key ("opendoor" by
+   default).
+3. In Gladys, install the OpenGarage integration from the store.
+4. Type the IP addresses of the controllers (separated by commas) and the
+   device key (the same for every controller).
+5. Add the devices from the Discovery tab.
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+Reading the state needs no key; opening and closing do. The key is kept by
+Gladys in its database, never shown again, sent only to your controllers (in
+clear on your local network: they have no https). It never appears in the
+logs, the statuses, the errors nor in `/data`.
 
-## Scenes
+"Check the controllers" shows what each address answered; it never reads a
+controller sooner than the refresh interval.
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+## Command safety
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+The relay of an OpenGarage is a **toggle**: the same pulse opens a closed
+door, closes an open one, and stops or reverses a moving one. Gladys takes it
+into account:
 
-## Dashboard
+- The door is never a switch: a "turn everything off" of a voice assistant or
+  a scene cannot reach it. It has two buttons, Open and Close.
+- Before every pulse, Gladys reads the door again and checks the MAC address
+  of the controller (a router giving the IP address to another controller
+  never moves the wrong door). "Open" is only sent to a door read closed,
+  "Close" only to a door read open. Already there: nothing is sent. Moving,
+  stopped half way or unknown: refused.
+- **Opening is off by default**: turn on "Allow opening the garage door". The
+  permission is checked when the command arrives, after the read and right
+  before the request leaves.
+- **Closing is always allowed**, goes before the other commands, stays
+  possible while the controller asks to wait (one try) and cancels an opening
+  that has not left yet.
+- After a pulse, the next one is refused until the door is read where it was
+  sent (45 seconds at most), even after a restart: a second pulse would stop
+  or reverse it. Use the wall button or the remote control to stop it.
+- A command that cannot leave within 3.5 seconds is refused unsent; a command
+  that left without an answer is reported "sent, without confirmation", and
+  the door is read again in the following seconds. A successful command means
+  the controller accepted the pulse: the door then takes 10 to 30 seconds to
+  move.
+- At most a second passes between the read and the pulse: if the door moves
+  meanwhile (remote control), the pulse may stop it.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+## Failures
 
-## Troubleshooting
+- Device key refused by a controller: the openings of that controller are
+  refused unsent for 15 min, then 1 h, 6 h and 24 h; saving another key tries
+  again at once. The reads go on, and closing stays possible.
+- A controller that asks to wait (HTTP 429 or 5xx) is paused for one minute
+  to six hours, even after a restart.
+- A controller that does not answer is read again after 30 s, 1, 2 then
+  5 min, never sooner than the refresh interval. An answer without a readable
+  MAC address counts as a failure, never as another controller.
+- After a restart, Gladys waits a whole interval before reading again.
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+## Limits
+
+- No automatic search: type the addresses.
+- One key for every controller.
+- No Security+ light or lock (firmware 1.2.x), no openings counter, no
+  OpenGarage cloud nor MQTT.

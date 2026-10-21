@@ -1,177 +1,126 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "OpenGarage",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "OpenGarage controllers, locally: garage door, distance, vehicle, Wi-Fi signal.",
+    "fr": "Contrôleurs OpenGarage, en local : porte de garage, distance, voiture, signal Wi-Fi."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-opengarage:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-opengarage/main/cover.png",
+  "categories": ["security"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your OpenGarage controllers, on your local network",
+        "fr": "Vos contrôleurs OpenGarage, sur votre réseau local"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "The door state, the distance sensor, the vehicle detection, the Wi-Fi signal (and the temperature and humidity when a sensor is fitted) of each OpenGarage controller, through its local HTTP API, without the OpenGarage cloud. Give each controller a fixed IP address in your router, type the addresses below, then add them from the Discovery tab. Never tested with a real device. Unofficial integration, not affiliated with OpenGarage.",
+        "fr": "L'état de la porte, le capteur de distance, la détection de voiture, le signal Wi-Fi (et la température et l'humidité quand un capteur est monté) de chaque contrôleur OpenGarage, par son API HTTP locale, sans le cloud OpenGarage. Donnez à chaque contrôleur une adresse IP fixe dans votre box, saisissez les adresses ci-dessous, puis ajoutez-les depuis l'onglet Découverte. Jamais testé avec un vrai appareil. Intégration non officielle, sans lien avec OpenGarage."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-opengarage/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-opengarage/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "addresses",
+      "type": "string",
+      "label": { "en": "IP addresses of the controllers", "fr": "Adresses IP des contrôleurs" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "Separated by commas, for example 192.168.1.50, 192.168.1.51 (add :port if it is not 80).",
+        "fr": "Séparées par des virgules, par exemple 192.168.1.50, 192.168.1.51 (ajoutez :port s'il n'est pas 80)."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "placeholder": { "en": "192.168.1.50", "fr": "192.168.1.50" },
       "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
+      "default": ""
     },
     {
-      "key": "poll_frequency",
+      "key": "device_key",
+      "type": "secret",
+      "label": { "en": "Device key", "fr": "Clé de l'appareil" },
+      "description": {
+        "en": "The device key set in the controller (\"opendoor\" until you change it: change it). The same for every controller. Only needed to open and close. Kept by Gladys in its database, never shown again, sent only to your OpenGarage controllers (in clear on your local network: they have no https).",
+        "fr": "La clé de l'appareil réglée dans le contrôleur (« opendoor » tant que vous ne la changez pas : changez-la). La même pour tous les contrôleurs. Seulement nécessaire pour ouvrir et fermer. Ce champ est gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement à vos contrôleurs OpenGarage (en clair sur votre réseau local : ils n'ont pas de https)."
+      },
+      "required": false
+    },
+    {
+      "key": "poll_interval",
       "type": "number",
       "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "How often each controller is read, in seconds. Never sooner, even after a restart.",
+        "fr": "Fréquence de lecture de chaque contrôleur, en secondes. Jamais plus souvent, même après un redémarrage."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": 10,
+      "min": 5,
+      "max": 300
+    },
+    {
+      "key": "door_section",
+      "type": "section",
+      "label": { "en": "Opening and closing", "fr": "Ouverture et fermeture" },
+      "description": {
+        "en": "The door is shown with two buttons, never as a switch. The relay of an OpenGarage is a toggle: the same pulse opens a closed door, closes an open one, and stops or reverses a moving one. So Gladys reads the door just before each pulse: \"Open\" is only sent to a door read closed, \"Close\" only to a door read open; moving, stopped or unknown: refused. After a pulse, the next one is refused until the door is read where it was sent (45 s at most). Closing is always allowed; opening is refused until you allow it below.",
+        "fr": "La porte est affichée avec deux boutons, jamais comme un interrupteur. Le relais d'un OpenGarage est une bascule : la même impulsion ouvre une porte fermée, ferme une porte ouverte, et arrête ou inverse une porte en mouvement. Gladys lit donc la porte juste avant chaque impulsion : « Ouvrir » n'est envoyé qu'à une porte lue fermée, « Fermer » qu'à une porte lue ouverte ; en mouvement, arrêtée ou inconnue : refusé. Après une impulsion, la suivante est refusée tant que la porte n'est pas lue là où elle a été envoyée (45 s au plus). Fermer est toujours permis ; ouvrir est refusé tant que vous ne l'autorisez pas ci-dessous."
+      }
+    },
+    {
+      "key": "allow_open",
+      "type": "boolean",
+      "label": {
+        "en": "Allow opening the garage door",
+        "fr": "Autoriser l'ouverture de la porte de garage"
+      },
+      "description": {
+        "en": "Off by default. On: the dashboard, the scenes and the voice assistants can open the garage door.",
+        "fr": "Désactivé par défaut. Activé : le tableau de bord, les scènes et les assistants vocaux peuvent ouvrir la porte de garage."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the feature names",
+        "fr": "Langue des noms des fonctionnalités"
+      },
+      "description": {
+        "en": "Used for the names of the features added from now on, and for the command errors.",
+        "fr": "Sert aux noms des fonctionnalités ajoutées désormais, et aux erreurs des commandes."
+      },
+      "required": false,
+      "default": "fr",
+      "options": [
+        { "value": "fr", "label": { "en": "French", "fr": "Français" } },
+        { "value": "en", "label": { "en": "English", "fr": "Anglais" } }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "check_controllers",
+      "label": { "en": "Check the controllers", "fr": "Vérifier les contrôleurs" },
+      "description": {
+        "en": "Shows what each address answered (never read sooner than the refresh interval).",
+        "fr": "Affiche ce que chaque adresse a répondu (jamais relue plus vite que l'intervalle de rafraîchissement)."
+      },
       "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

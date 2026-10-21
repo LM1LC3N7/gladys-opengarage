@@ -5,19 +5,22 @@ contributors.
 
 ## What this is
 
-A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
-no build step) that runs in its own sandboxed Docker container and talks to
-Gladys through
+A Gladys Assistant **external integration** for OpenGarage controllers (local
+HTTP API, no cloud): a Node.js service (Node 22+, ESM, no build step) that
+runs in its own sandboxed Docker container and talks to Gladys through
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
-its only runtime dependency. It started from the official JavaScript template.
+its only runtime dependency. It started from the official JavaScript template
+and the structure of LM1LC3N7/gladys-blebox, and ports open-garage (MIT). See
+`TODO.md` for the status and the decisions.
 
 ## Commands
 
 ```bash
 npm install
 npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test test/app.test.js              # one file
+node --test --test-name-pattern "guard"   # tests whose name matches
+npm run cover                             # regenerate cover.png (800×534)
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
@@ -31,46 +34,54 @@ pushing.
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
+index.js                          SDK wiring only: src/handlers.js registered before connect()
+src/handlers.js                   the SDK handlers -> OpenGarageApp (shared with the tests)
+src/app.js                        OpenGarageApp: reads, identity, pauses, key holds, pulses, guard
+src/opengarage/http.js            one HTTP request: deadline, size cap, sent flag, beforeSend
+src/opengarage/client.js          GET /jc, GET /cc click, statuses -> error kinds
+src/opengarage/parse.js           /jc -> identity, layout, reading (pure)
+src/model.js                      controllers -> Gladys devices and values (pure)
+src/publisher.js                  states within the rate limit (250/min), measures spaced
+src/store.js                      /data/opengarage.json (controllers, pauses, guards), never a key
 src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
+src/constants.js, src/i18n.js     frozen keys, limits, timings; texts in English and French
+scripts/cover.mjs                 cover.png generator (plain Node)
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+test/                             node --test, against the SDK's fake Gladys and fake controllers
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
 ## Rules
 
-- **External ids are forever.** Build them with
-  `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
-  platform gives the device (serial, cloud id, MAC), never a label. Gladys keys
-  devices, their history, scenes and dashboards on them: changing one creates a
-  new device and orphans the old one. The same goes for every key users store:
-  manifest `config_schema`, `actions`, widget and scene keys, feature keys.
-- **The container rootfs is read-only.** Write only under `/data`, the one
-  writable volume. Never log tokens, passwords or API keys.
+- **External ids are forever.** `gladys.externalIds('opengarage', mac)`,
+  never a label nor an address. Feature keys, manifest keys and action keys
+  are frozen too. A created device never loses a feature.
+- **Safety.** The door is never a `switch` nor a commandable `binary`. The
+  relay is a toggle: a pulse is decided on `/jc` read just now (MAC checked),
+  "open" only from closed, "close" only from open, never from a moving,
+  stopped or unknown door. Opening stays off by default, checked on arrival,
+  after the read and in `beforeSend`; closing is never blocked by the option,
+  the queue or a pause, and cancels what waits. A guard follows every pulse.
+  Keep the tests that say so.
+- **The device key** is never logged, never in a status, an error or `/data`
+  (it travels in the `/cc` query string: never log a path). A `secret` field
+  is kept by Gladys in its database, never shown again: never write that it
+  is encrypted.
+- **Reads** are never sooner than the interval (reconnection, saved config,
+  scan, action, restart); a late answer of an older generation publishes
+  nothing.
+- **The container rootfs is read-only.** Write only under `/data`.
 - **Versions belong to the Release workflow** (Actions → Release). Never edit
-  `version` in `package.json` or in the manifest, nor the `docker_image` tag,
-  by hand — except on the README's hand-pushed tag path, which bumps all three
-  together before tagging. `test/manifest.test.js` checks they agree.
+  `version` in `package.json`, `package-lock.json` or the manifest, nor the
+  `docker_image` tag, by hand. `test/manifest.test.js` checks they agree.
 - **Changelog.** Every user-visible change adds a line under `## [Unreleased]`
-  in `CHANGELOG.md` (`### Added`, `Changed`, `Fixed`, `Removed`, `Security`).
-  Never write a version heading: the Release workflow moves the section, and it
-  becomes the notes of the GitHub Release.
-- **Manifest.** Texts are multi-language objects `{ "en": ..., "fr": ... }`:
-  `label`, `description` and `placeholder` alike, never a plain string. The
-  catalog `description` holds 10 to 100 characters per language. A field the
-  older cores do not know needs a higher `gladys_version` minimum
-  (`categories`: 4.86.0; `widgets`, `scene_triggers`, `scene_actions`,
-  `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
-  code (defaults, action, scene and widget handlers): change both sides
-  together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
+  in `CHANGELOG.md`. Never write a version heading.
+- **Manifest.** Texts are `{ "en": ..., "fr": ... }` objects. The catalog
+  `description` holds 10 to 100 characters per language.
+- **Units.** Only the ones the core lists for the category
+  (`DEVICE_FEATURE_UNITS_BY_CATEGORY` in `server/utils/constants.js`).
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
-  in English. Tests never touch the network.
+  in English. Tests never touch the network (loopback only).
+- **Encoding.** Every file is UTF-8 without BOM; `test/encoding.test.js`
+  refuses mojibake and control characters.

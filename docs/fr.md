@@ -1,67 +1,93 @@
-# Template de démonstration
+# OpenGarage pour Gladys Assistant
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Cette intégration affiche vos contrôleurs OpenGarage dans Gladys et commande
+votre porte de garage par leur API HTTP locale, sur votre réseau, sans le
+cloud OpenGarage.
 
-## Ce que vous obtenez
+**Jamais testé avec un vrai appareil** : l'intégration suit l'API du
+micrologiciel et la bibliothèque open-garage (celle de Home Assistant), mais
+personne ne l'a encore essayée sur un contrôleur réel. Vos retours sont les
+bienvenus.
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+Intégration non officielle, sans lien avec OpenGarage.
 
-## Configuration
+## Dans Gladys
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+| Fonctionnalité         | Détail                                                   |
+| ---------------------- | -------------------------------------------------------- |
+| Porte de garage        | ouverte / fermée (capteur d'ouverture, lecture seule)    |
+| Ouvrir / Fermer        | deux boutons, jamais un interrupteur                     |
+| Capteur de distance    | en cm                                                    |
+| Voiture dans le garage | présente / absente (inconnue quand la porte est ouverte) |
+| Signal Wi-Fi           | de 0 à 5                                                 |
+| Température, humidité  | seulement si un capteur est monté sur le contrôleur      |
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+## Installation
 
-## Actions
+1. Donnez à chaque contrôleur une adresse IP fixe dans votre box.
+2. Dans les réglages du contrôleur, changez la clé de l'appareil
+   (« opendoor » par défaut).
+3. Dans Gladys, installez l'intégration OpenGarage depuis le store.
+4. Saisissez les adresses IP des contrôleurs (séparées par des virgules) et
+   la clé de l'appareil (la même pour tous les contrôleurs).
+5. Ajoutez les appareils depuis l'onglet Découverte.
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+La lecture de l'état ne demande pas la clé ; ouvrir et fermer, si. La clé
+est gardée par Gladys dans sa base, jamais réaffichée, envoyée seulement à vos
+contrôleurs (en clair sur votre réseau local : ils n'ont pas de https). Elle
+n'apparaît jamais dans les journaux, les statuts, les erreurs ni dans `/data`.
 
-## Scènes
+« Vérifier les contrôleurs » affiche ce que chaque adresse a répondu ; il ne
+relit jamais un contrôleur plus vite que l'intervalle de rafraîchissement.
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+## Sécurité des commandes
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+Le relais d'un OpenGarage est une **bascule** : la même impulsion ouvre une
+porte fermée, ferme une porte ouverte, et arrête ou inverse une porte en
+mouvement. Gladys en tient compte :
 
-## Tableau de bord
+- La porte n'est jamais un interrupteur : un « éteins tout » d'un assistant
+  vocal ou d'une scène ne peut pas l'atteindre. Elle a deux boutons, Ouvrir
+  et Fermer.
+- Avant chaque impulsion, Gladys relit la porte et vérifie l'adresse MAC du
+  contrôleur (une box qui redonne l'adresse IP à un autre contrôleur ne fait
+  jamais bouger la mauvaise porte). « Ouvrir » n'est envoyé qu'à une porte
+  lue fermée, « Fermer » qu'à une porte lue ouverte. Déjà dans l'état voulu :
+  rien n'est envoyé. En mouvement, arrêtée à mi-course ou inconnue : refusé.
+- **Ouvrir est désactivé par défaut** : activez « Autoriser l'ouverture de la
+  porte de garage ». L'autorisation est vérifiée à l'arrivée de la commande,
+  après la lecture et juste avant l'envoi.
+- **Fermer est toujours permis**, passe avant les autres commandes, reste
+  possible quand le contrôleur demande d'attendre (un seul essai) et annule
+  une ouverture qui n'est pas encore partie.
+- Après une impulsion, la suivante est refusée tant que la porte n'est pas
+  lue là où elle a été envoyée (45 secondes au plus), même après un
+  redémarrage : une seconde impulsion l'arrêterait ou l'inverserait.
+  Utilisez le bouton mural ou la télécommande pour l'arrêter.
+- Une commande qui ne peut pas partir en 3,5 secondes est refusée sans être
+  envoyée ; une commande partie sans réponse est annoncée « envoyée, sans
+  confirmation », et la porte est relue dans les secondes qui suivent. Le
+  succès d'une commande veut dire que le contrôleur a accepté l'impulsion :
+  la porte met ensuite 10 à 30 secondes à bouger.
+- Entre la lecture et l'impulsion, une seconde s'écoule au plus : si la
+  porte bouge pendant ce temps (télécommande), l'impulsion peut l'arrêter.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+## Pannes
 
-## Dépannage
+- Clé refusée par un contrôleur : les ouvertures vers ce contrôleur sont
+  refusées sans être envoyées pendant 15 min, puis 1 h, 6 h et 24 h ;
+  enregistrer une autre clé réessaie aussitôt. Les lectures continuent, et
+  fermer reste possible.
+- Un contrôleur qui demande d'attendre (HTTP 429 ou 5xx) est mis en pause
+  d'une minute à six heures, même après un redémarrage.
+- Un contrôleur qui ne répond pas est relu après 30 s, 1, 2 puis 5 min,
+  jamais plus vite que l'intervalle de rafraîchissement. Une réponse sans
+  adresse MAC lisible compte comme un échec, jamais comme un autre contrôleur.
+- Après un redémarrage, Gladys attend un intervalle entier avant de relire.
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+## Limites
+
+- Pas de recherche automatique : saisissez les adresses.
+- Une seule clé pour tous les contrôleurs.
+- Pas de lumière ni de verrou Security+ (micrologiciel 1.2.x), pas de
+  compteur d'ouvertures, pas de cloud OpenGarage ni de MQTT.
