@@ -36,8 +36,19 @@ function transportError(err, sent) {
  * @param {number} options.maxBytes body size cap
  * @param {() => void} [options.beforeSend] if it throws, nothing is sent and
  *   its error is passed on with `beforeSend` set
+ * @param {AbortSignal} [options.signal] aborted before the connection is up:
+ *   'cancelled', nothing sent; ignored once the request may have left
  */
-export function httpRequest({ host, port, path, timeout, sendWithin, maxBytes, beforeSend }) {
+export function httpRequest({
+  host,
+  port,
+  path,
+  timeout,
+  sendWithin,
+  maxBytes,
+  beforeSend,
+  signal,
+}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let req = null;
@@ -51,6 +62,7 @@ export function httpRequest({ host, port, path, timeout, sendWithin, maxBytes, b
       settled = true;
       clearTimeout(timer);
       clearTimeout(sendTimer);
+      signal?.removeEventListener('abort', onAbort);
       if (error) {
         req?.destroy();
         reject(error);
@@ -73,6 +85,18 @@ export function httpRequest({ host, port, path, timeout, sendWithin, maxBytes, b
             },
             Math.max(0, sendWithin),
           );
+    // Cancelled while the connection is not up yet: nothing has left, the
+    // attempt is dropped at once (a request already sent is never aborted).
+    const onAbort = () => {
+      if (!connected) {
+        finish(new OpenGarageError('cancelled'));
+      }
+    };
+    if (signal?.aborted) {
+      finish(new OpenGarageError('cancelled'));
+      return;
+    }
+    signal?.addEventListener('abort', onAbort);
     const markConnected = () => {
       if (connected || settled) {
         return;

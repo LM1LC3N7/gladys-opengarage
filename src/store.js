@@ -132,10 +132,19 @@ export function sanitize(data, now = Date.now()) {
     }
   }
   if (isObject(data.lastReads)) {
-    for (const [address, read] of Object.entries(data.lastReads).slice(0, LIMITS.addresses)) {
-      if (parseAddress(address) !== address || !isObject(read) || typeof read.ok !== 'boolean') {
-        continue;
-      }
+    // The most recent ones first: a file holding more than the limit keeps
+    // the addresses read lately.
+    const entries = Object.entries(data.lastReads)
+      .slice(0, LIMITS.addresses * 10)
+      .filter(
+        ([address, read]) =>
+          parseAddress(address) === address && isObject(read) && typeof read.ok === 'boolean',
+      )
+      .sort(
+        ([, a], [, b]) => (Number.isFinite(b.at) ? b.at : 0) - (Number.isFinite(a.at) ? a.at : 0),
+      )
+      .slice(0, LIMITS.addresses);
+    for (const [address, read] of entries) {
       const at = Number.isFinite(read.at) ? Math.min(read.at, now) : now;
       base.lastReads[address] =
         read.ok && typeof read.id === 'string' && DEVICE_ID.test(read.id)

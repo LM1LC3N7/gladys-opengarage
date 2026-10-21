@@ -8,6 +8,7 @@
  * - timeout:     no complete answer in time
  * - unreachable: no connection, or a connection lost
  * - late:        a command could not leave before its deadline (nothing sent)
+ * - cancelled:   cancelled before its connection was up (nothing sent)
  * - busy:        HTTP 429 or 5xx, the controller asks for a pause
  * - http:        another HTTP status
  * - invalid:     not the JSON an OpenGarage controller answers

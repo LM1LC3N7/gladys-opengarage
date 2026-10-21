@@ -39,7 +39,14 @@ function clock(start = 1_800_000_000_000) {
 
 async function setup(
   t,
-  { config = {}, net = fakeNetwork(), store = new MemoryStore(), devices = [], now = clock() } = {},
+  {
+    config = {},
+    net = fakeNetwork(),
+    store = new MemoryStore(),
+    devices = [],
+    now = clock(),
+    appTimers = timers,
+  } = {},
 ) {
   const fullConfig = { addresses: `${A}, ${B}`, device_key: KEY, ...config };
   const gladys = createFakeGladys({ selector: SELECTOR, config: fullConfig, devices });
@@ -55,7 +62,7 @@ async function setup(
     logger,
     client: new OpenGarageClient({ request: net.request, now }),
     store,
-    timers,
+    timers: appTimers,
     now,
   });
   registerHandlers(gladys, app, logger);
@@ -579,7 +586,8 @@ test('after a restart a door can be closed before the first read; the guard is k
   now.advance(14_000);
   const close = await press(second.gladys, MACS.a, 'close');
   assert.equal(close.success, true, close.error);
-  assert.equal(net.reads().length, reads + 2, 'only the reads of the commands');
+  // The young guard refused the opening at once (no read); the close read once.
+  assert.equal(net.reads().length, reads + 1, 'only the read of the close');
 });
 
 test('M1/H5: a restart while a pulse is out keeps its guard (set in beforeSend)', async (t) => {
@@ -698,4 +706,64 @@ test('a controller without a MAC is said in the status, never added', async (t) 
   const { gladys } = await setup(t, { net });
   assert.equal(gladys.fake.discoveredDevices.length, 1);
   assert.match(gladys.fake.connectionStatus.message.en, /Not an OpenGarage controller/);
+});
+
+test('r1/N1: a close behind a pulse that LEFT is refused at once, "just commanded"', async (t) => {
+  const { gladys, net, app } = await setup(t, { config: { allow_open: true } });
+  // The opening leaves (beforeSend) and its answer never comes.
+  const request = app.client.request;
+  app.client.request = (options) => {
+    if (options.path.startsWith('/cc')) {
+      options.beforeSend?.();
+      return new Promise(() => {});
+    }
+    return request(options);
+  };
+  void press(gladys, MACS.a, 'open');
+  await tick();
+  net.table[A].jc.door = 1;
+  const started = Date.now();
+  const close = await press(gladys, MACS.a, 'close');
+  assert.ok(Date.now() - started < 3500, `${Date.now() - started} ms`);
+  assert.equal(close.success, false);
+  assert.match(close.error, /vient d'être commandée/);
+});
+
+test('r1: the wait in the queue ends by 3.3 s (real timer), with its reason', async (t) => {
+  const realTimers = {
+    ...timers,
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle),
+  };
+  const { gladys, net } = await setup(t, {
+    config: { allow_open: true },
+    appTimers: realTimers,
+  });
+  // The first opening is stuck in its read (not sent): the second one waits.
+  const release = net.hold(A, '/jc');
+  const first = press(gladys, MACS.a, 'open');
+  await tick();
+  const started = Date.now();
+  const second = await press(gladys, MACS.a, 'open');
+  const waited = Date.now() - started;
+  assert.ok(waited >= 3000 && waited < 3500, `${waited} ms`);
+  assert.match(second.error, /pas répondu à temps/);
+  release();
+  await first;
+  assert.equal(net.clicks().length, 1, 'only the first one left');
+});
+
+test('r2/N2: a cancelled opening drops its connection attempt at once', async (t) => {
+  const { gladys, net } = await setup(t, { config: { allow_open: true } });
+  // The connection of the opening's pulse does not come up.
+  net.hold(A, '/cc');
+  const open = press(gladys, MACS.a, 'open');
+  await tick();
+  const started = Date.now();
+  const close = await press(gladys, MACS.a, 'close');
+  const opened = await open;
+  assert.ok(Date.now() - started < 1000, `${Date.now() - started} ms`);
+  assert.match(opened.error, /Annulée/);
+  assert.equal(close.success, true, close.error);
+  assert.equal(net.clicks().length, 0, 'door read closed: nothing to send');
 });

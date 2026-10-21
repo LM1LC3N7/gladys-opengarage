@@ -37,6 +37,29 @@ export function controllers() {
   };
 }
 
+/** Waits for `promise` like a connection: late after `sendWithin`, cancelled on abort. */
+function waitConnection(promise, { sendWithin, signal }) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const done = (error) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => done(new OpenGarageError('cancelled'));
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort);
+    if (sendWithin !== undefined) {
+      timer = setTimeout(() => done(new OpenGarageError('late')), Math.max(0, sendWithin));
+    }
+    promise.then(() => done());
+  });
+}
+
 /**
  * The `request` of OpenGarageClient over the fake controllers.
  * - `hold(address, prefix)`: the next request to it waits for `release()`;
@@ -65,7 +88,9 @@ export function fakeNetwork(table = controllers()) {
         await hold.promise;
         return { status: 200, headers: {}, body: Buffer.from(JSON.stringify(snapshot)) };
       }
-      await hold.promise;
+      // A connection that does not come up: as http.js, 'late' after
+      // `sendWithin` (real time) and 'cancelled' on the signal, nothing sent.
+      await waitConnection(hold.promise, options);
     }
     const device = table[address];
     if (!device) {

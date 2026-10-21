@@ -189,6 +189,13 @@ export class OpenGarageApp {
           this.addresses.delete(address);
         }
       }
+      // The outcome of the last read is only kept for the typed addresses.
+      for (const address of Object.keys(this.data.lastReads)) {
+        if (!this.config.addresses.includes(address)) {
+          delete this.data.lastReads[address];
+          this.persist();
+        }
+      }
       this.reads.clear();
     }
     // Gladys keeps the status and the Discovery tab in memory: sent again at every start.
@@ -836,26 +843,52 @@ export class OpenGarageApp {
     }
     const action = target.key === 'open' ? this.openAction(record) : this.closeAction(record);
     this.checkOption(action);
-    const ticket = { action, cancelled: false, sent: false, generation: this.generation };
+    const ticket = {
+      action,
+      cancelled: false,
+      sent: false,
+      generation: this.generation,
+      abort: new AbortController(),
+    };
     if (action.cancelsOpening) {
       // The openings still waiting to leave are cancelled on arrival, before
       // any queue, queued ones included. Cancelling never sends anything.
       for (const pending of this.tickets.get(record.id) ?? []) {
         if (!pending.sent) {
           pending.cancelled = true;
+          // Its connection attempt, if any, is dropped at once: the queue is free.
+          pending.abort.abort();
         }
       }
-    } else {
+    }
+    // A pulse that cannot leave is refused at once, with its real reason:
+    // one already left (a second would stop or reverse the door), or a guard
+    // younger than its minimum (no read can lift it yet).
+    this.checkJustCommanded(record);
+    if (!action.cancelsOpening) {
       if (!this.tickets.has(record.id)) {
         this.tickets.set(record.id, new Set());
       }
       this.tickets.get(record.id).add(ticket);
     }
     // One queue per controller: a close waits behind a pulse in progress
-    // (which it has cancelled if it had not left), never beside it.
+    // (which it has cancelled if it had not left), never beside it. The wait
+    // ends by sendBy - 200 ms: the answer always comes within 3.5 s.
     const previous = this.queues.get(record.id) ?? Promise.resolve();
-    const run = previous.then(() => this.run(record, action, received, ticket));
-    const tail = run.catch(() => {});
+    let timer;
+    const turn = new Promise((resolve, reject) => {
+      previous.then(resolve, resolve);
+      timer = this.timers.setTimeout(
+        () => {
+          const flying = this.flights.get(record.id);
+          reject(this.refusal(flying?.sent ? ERRORS.justCommanded : ERRORS.tooSlow));
+        },
+        Math.max(0, received + TIMINGS.commandSendBy - 200 - this.now()),
+      );
+    }).finally(() => this.timers.clearTimeout(timer));
+    const run = turn.then(() => this.run(record, action, received, ticket));
+    // The next command waits for this one AND everything before it.
+    const tail = Promise.allSettled([previous, run]).then(() => {});
     this.queues.set(record.id, tail);
     try {
       return await run;
@@ -864,6 +897,17 @@ export class OpenGarageApp {
       if (this.queues.get(record.id) === tail) {
         this.queues.delete(record.id);
       }
+    }
+  }
+
+  /** Refuses at once a pulse while another one has left or a young guard holds. */
+  checkJustCommanded(record) {
+    if (this.flights.get(record.id)?.sent) {
+      throw this.refusal(ERRORS.justCommanded);
+    }
+    const guard = this.data.guards[record.id];
+    if (guard && this.now() < guard.until && this.now() - guard.at < TIMINGS.doorGuardMin) {
+      throw this.refusal(ERRORS.justCommanded);
     }
   }
 
@@ -1011,9 +1055,13 @@ export class OpenGarageApp {
     const origin = { seq: this.nextSequence(), at: this.now() };
     try {
       if (left() <= 0) throw this.refusal(ERRORS.tooSlow);
-      data = await this.client.variables(address, { timeout: left() });
+      data = await this.client.variables(address, {
+        timeout: left(),
+        signal: ticket.abort?.signal,
+      });
     } catch (err) {
       if (err.refusal) throw err;
+      if (err.kind === 'cancelled' || ticket.cancelled) throw this.refusal(ERRORS.cancelled);
       this.onFailure(address, err);
       if (err.kind === 'busy') throw this.refusal(ERRORS.blocked);
       throw this.refusal(
@@ -1067,6 +1115,7 @@ export class OpenGarageApp {
     try {
       result = await this.client.command(address, key, command, {
         timeout: Math.max(100, answerBy - this.now()),
+        signal: ticket.abort?.signal,
         sendWithin: sendBy - this.now(),
         // The very last check, right before the request leaves; the guard
         // is set (and saved) before the first byte.
@@ -1084,6 +1133,7 @@ export class OpenGarageApp {
       if (!err.sent) {
         this.unguardDoor(record, guard);
         this.logger.warn(`OpenGarage ${record.id}: ${action.name} NOT sent (${reason})`);
+        if (err.kind === 'cancelled' || ticket.cancelled) throw this.refusal(ERRORS.cancelled);
         throw this.refusal(err.kind === 'late' ? ERRORS.tooSlow : ERRORS.notSent(reason));
       }
       this.onFailure(address, err);

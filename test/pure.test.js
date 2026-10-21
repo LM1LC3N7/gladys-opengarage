@@ -189,3 +189,15 @@ test('/data: checked when read back, bounded, never a key', () => {
   assert.equal(data.guards['5ccf7f010203'].until, now + 45_000);
   assert.deepEqual(Object.keys(sanitize(null)), Object.keys(emptyData()));
 });
+
+test('r3: /data keeps the most recent last reads within the limit', () => {
+  const now = 1_000_000;
+  const lastReads = {};
+  for (let i = 0; i < 30; i += 1) {
+    lastReads[`192.168.1.${i + 1}`] = { ok: false, at: now - 100_000 + i * 1000 };
+  }
+  const kept = Object.keys(sanitize({ lastReads }, now).lastReads);
+  assert.equal(kept.length, 20);
+  assert.ok(kept.includes('192.168.1.30'), 'the latest is kept');
+  assert.ok(!kept.includes('192.168.1.1'), 'the oldest is dropped');
+});

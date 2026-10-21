@@ -25,6 +25,13 @@ up to date at the end of every milestone.
       from the real terminal.
 - [x] **Review 1 fixes** (2026-10-21): I1-I6, M1, M2 (M3 gone with I1), see
       the Decisions.
+- [x] **Review 2 remarks** (2026-10-21, approved): r1 a pulse is refused at
+      once ("just commanded") while another one has left or a guard is
+      younger than 15 s, and the wait in the queue ends by 3.3 s; r2 a
+      cancelled opening aborts its connection attempt (AbortSignal); r3
+      `lastReads` pruned to the typed addresses, `/data` keeps the most
+      recent ones. r4 (holds of a key that works elsewhere, after a restart)
+      left as is.
 - [ ] **Milestone 2 — real hardware** (testers with a controller): record
       real `/jc` and `/cc` answers as fixtures, fix what differs. To check
       first:

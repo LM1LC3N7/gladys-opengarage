@@ -57,9 +57,10 @@ export class OpenGarageClient {
    * @param {number} [options.timeout] ms for the whole exchange
    * @param {number} [options.sendWithin] ms to start, else not sent ('late')
    * @param {() => void} [options.beforeSend]
+   * @param {AbortSignal} [options.signal] drops an attempt not connected yet
    * @returns {Promise<object>} the JSON object answered
    */
-  async get(address, path, { timeout, sendWithin, beforeSend } = {}) {
+  async get(address, path, { timeout, sendWithin, beforeSend, signal } = {}) {
     const { host, port } = splitAddress(address);
     const answer = await this.request({
       host,
@@ -69,6 +70,7 @@ export class OpenGarageClient {
       sendWithin,
       maxBytes: LIMITS.responseBytes,
       beforeSend,
+      signal,
     });
     const { status } = answer;
     if (status === 429 || (status >= 500 && status <= 599)) {
