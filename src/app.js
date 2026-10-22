@@ -894,9 +894,14 @@ export class OpenGarageApp {
       return await run;
     } finally {
       this.tickets.get(record.id)?.delete(ticket);
-      if (this.queues.get(record.id) === tail) {
-        this.queues.delete(record.id);
-      }
+      // The entry leaves the queue only once everything before it has
+      // settled too: a command refused by the wait bound never lets a later
+      // one run beside an earlier one still running.
+      tail.then(() => {
+        if (this.queues.get(record.id) === tail) {
+          this.queues.delete(record.id);
+        }
+      });
     }
   }
 
@@ -905,7 +910,7 @@ export class OpenGarageApp {
     if (this.flights.get(record.id)?.sent) {
       throw this.refusal(ERRORS.justCommanded);
     }
-    const guard = this.data.guards[record.id];
+    const guard = this.clampGuard(this.data.guards[record.id]);
     if (guard && this.now() < guard.until && this.now() - guard.at < TIMINGS.doorGuardMin) {
       throw this.refusal(ERRORS.justCommanded);
     }
@@ -964,7 +969,22 @@ export class OpenGarageApp {
    * (a distance sensor sees the expected state before the end of travel).
    * The guard also ends 45 s after the pulse.
    */
+  /**
+   * A clock that went back (a manual change, NTP): the guard is brought back
+   * to min(at, now) and at most 45 s from now, as `sanitize` does, so a
+   * refusal never lasts longer than planned.
+   */
+  clampGuard(guard) {
+    if (guard && guard.at > this.now()) {
+      guard.at = this.now();
+      guard.until = Math.min(guard.until, this.now() + TIMINGS.doorGuard);
+      this.persist();
+    }
+    return guard;
+  }
+
   guardLifted(guard, reading, origin) {
+    this.clampGuard(guard);
     if (this.now() >= guard.until) {
       return true;
     }

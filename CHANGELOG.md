@@ -10,6 +10,14 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- A command refused because it waited too long in the queue no longer lets
+  a later command run beside an earlier one still in progress: commands to a
+  controller stay one at a time, in order.
+- If the system clock goes back, the guard after a pulse is brought back to
+  the current time: a refusal never lasts longer than planned.
+
 ## [0.1.1] - 2026-10-21
 
 ### Added

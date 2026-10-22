@@ -767,3 +767,41 @@ test('r2/N2: a cancelled opening drops its connection attempt at once', async (t
   assert.equal(close.success, true, close.error);
   assert.equal(net.clicks().length, 0, 'door read closed: nothing to send');
 });
+
+test('r5/T4: after a queue-bound refusal, a third command still waits for the first', async (t) => {
+  const realTimers = {
+    ...timers,
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle),
+  };
+  const { gladys, net } = await setup(t, {
+    config: { allow_open: true },
+    appTimers: realTimers,
+  });
+  const release = net.hold(A, '/jc'); // the first command's read hangs
+  const first = press(gladys, MACS.a, 'open');
+  await tick(20);
+  const refused = await press(gladys, MACS.a, 'open'); // queue bound, ~3.3 s real
+  assert.match(refused.error, /pas répondu à temps/);
+  const reads = net.reads().length;
+  const third = press(gladys, MACS.a, 'open');
+  await tick(50);
+  assert.equal(net.reads().length, reads, 'the third one does not run beside the first');
+  release();
+  const [a, c] = await Promise.all([first, third]);
+  assert.equal(a.success, true, a.error);
+  assert.equal(c.success, false, 'then refused by the guard of the first');
+  assert.equal(net.clicks().length, 1);
+});
+
+test('r6/T1d: a clock that went back never makes the guard last longer', async (t) => {
+  const { gladys, net, now } = await setup(t, { config: { allow_open: true } });
+  net.table[A].jc.door = 1;
+  assert.equal((await press(gladys, MACS.a, 'close')).success, true);
+  now.advance(-600_000);
+  assert.match((await press(gladys, MACS.a, 'open')).error, /vient d'être commandée/);
+  // 15 s after the jump (not 10 min + 15 s): the door read closed lifts it.
+  now.advance(15_000);
+  const ack = await press(gladys, MACS.a, 'open');
+  assert.equal(ack.success, true, ack.error);
+});
