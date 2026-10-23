@@ -6,8 +6,8 @@
     "en": "OpenGarage controllers, locally: garage door, distance, vehicle, Wi-Fi signal.",
     "fr": "Contrôleurs OpenGarage, en local : porte de garage, distance, voiture, signal Wi-Fi."
   },
-  "version": "0.1.2",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-opengarage:0.1.2",
+  "version": "0.1.3",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-opengarage:0.1.3",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-opengarage/main/cover.png",
   "categories": ["security"],
